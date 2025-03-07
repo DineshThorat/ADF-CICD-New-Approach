@@ -1,0 +1,67 @@
+trigger:
+  branches:
+    include:
+      - none
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+steps:
+  # Step 1: Install Node.js
+  - task: NodeTool@0
+    inputs:
+      versionSpec: '18.17.0'
+    displayName: 'Install Node.js'
+
+  # Step 2: Install Dependencies
+  - script: |
+      npm install
+    displayName: 'Install dependencies'
+
+  # Step 3: Validate ADF Configuration
+  - script: |
+      npm run validate $(Build.SourcesDirectory) /subscriptions/<subscription_id>/resourceGroups/<resource_group>/providers/Microsoft.DataFactory/factories/<dev_adf_name>
+    displayName: 'Validate ADF Resources'
+
+  # Step 4: Export ADF ARM Templates
+  - script: |
+      npm run export $(Build.SourcesDirectory) /subscriptions/<subscription_id>/resourceGroups/<resource_group>/providers/Microsoft.DataFactory/factories/<dev_adf_name>
+    displayName: 'Export ADF ARM Templates'
+
+  # Step 5: Debug - Check Exported Files
+  - script: |
+      echo "Listing source directory:"
+      ls -la $(Build.SourcesDirectory)
+      echo "Finding ARM template files:"
+      find $(Build.SourcesDirectory) -name "ARMTemplateForFactory.json"
+      find $(Build.SourcesDirectory) -name "ARMTemplateParametersForFactory.json"
+    displayName: 'Debug: Locate ARM template files'
+
+  # Step 6: Publish ADF Artifacts
+  - task: PublishBuildArtifacts@1
+    inputs:
+      pathToPublish: '$(Build.SourcesDirectory)'
+      artifactName: 'adf_artifacts'
+    displayName: 'Publish ADF Artifacts'
+
+  # Step 7: Debug - Inspect Full Workspace Structure
+  - script: |
+      echo "Full workspace structure:"
+      find $(Pipeline.Workspace) -type f -name "ARMTemplateForFactory.json" -o -name "ARMTemplateParametersForFactory.json"
+    displayName: 'Debug: Full workspace inspection'
+
+  # Step 8: Deploy ADF Resources
+  - task: AzureResourceManagerTemplateDeployment@3
+    displayName: 'Deploy to ADF'
+    inputs:
+      deploymentScope: 'Resource Group'
+      azureResourceManagerConnection: '<service-connection-name>'
+      subscriptionId: '<subscription-id>'
+      action: 'Create Or Update Resource Group'
+      resourceGroupName: '<resource-group-name>'
+      location: 'East US'
+      templateLocation: 'Linked artifact'
+      csmFile: '$(Build.SourcesDirectory)/ARMTemplateForFactory.json'
+      csmParametersFile: '$(Build.SourcesDirectory)/ARMTemplateParametersForFactory.json'
+      overrideParameters: '-factoryName "<prod_adf_name>"'
+      deploymentMode: 'Incremental'
